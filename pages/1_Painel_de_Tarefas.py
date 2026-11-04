@@ -161,12 +161,23 @@ with aba_kanban:
     col_k3.error("Travada")
     col_k4.success("Concluída")
     
+    hoje = datetime.date.today()
+    
     for t in tarefas:
         coluna_alvo = status_cols.get(t.status, col_k1)
         with coluna_alvo:
             with st.container(border=True):
-                st.markdown(f"**{t.nome}**")
+                # --- REGRA DE ATRASO ---
+                atrasada = t.data_termino and t.data_termino < hoje and t.status != "Concluída"
+                
+                if atrasada:
+                    st.markdown(f":red[**🚨 {t.nome}**]")
+                    st.caption(f":red[Venceu em: {t.data_termino.strftime('%d/%m/%Y')}]")
+                else:
+                    st.markdown(f"**{t.nome}**")
+                    
                 st.caption(f"Fase: {t.fase.nome} | Prio: {t.prioridade}")
+                
                 # Conta subtarefas para mostrar um indicador visual no Kanban
                 qtd_subs = db.query(Subtarefa).filter(Subtarefa.tarefa_id == t.id).count()
                 if qtd_subs > 0:
