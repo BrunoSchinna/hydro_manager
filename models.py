@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Float, Date, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Date, Boolean, ForeignKey, DateTime
+from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -37,10 +38,9 @@ class Tarefa(Base):
     is_marco = Column(Boolean, default=False)
     
     fase = relationship("Fase", back_populates="tarefas")
-    # Ligação com as novas subtarefas (se a tarefa for apagada, as subtarefas dela somem também)
+    # Ligação com as novas subtarefas
     subtarefas = relationship("Subtarefa", back_populates="tarefa", cascade="all, delete-orphan")
 
-# --- NOVA TABELA: SUBTAREFAS ---
 class Subtarefa(Base):
     __tablename__ = "subtarefas"
     id = Column(Integer, primary_key=True, index=True)
@@ -54,3 +54,12 @@ class Responsavel(Base):
     __tablename__ = "responsaveis"
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String, nullable=False)
+
+# --- NOVA TABELA: HISTÓRICO DE AUDITORIA ---
+class Historico(Base):
+    __tablename__ = "historico"
+    id = Column(Integer, primary_key=True, index=True)
+    usuario = Column(String, nullable=False)
+    acao = Column(String, nullable=False) # Ex: "Criou Projeto", "Editou Tarefa", "Excluiu"
+    detalhes = Column(String)             # Ex: "Tarefa 'Concretagem' passou de 10% para 50%"
+    data_hora = Column(DateTime(timezone=True), server_default=func.now())
