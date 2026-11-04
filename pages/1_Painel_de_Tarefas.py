@@ -185,15 +185,27 @@ with aba_subtarefas:
         if subs_db:
             st.markdown("#### Checklist")
             for sub in subs_db:
-                # O checkbox recarrega a tela automaticamente ao ser clicado
-                marcado = st.checkbox(f"{sub.nome}", value=sub.concluida, key=f"chk_{sub.id}")
-                if marcado != sub.concluida:
-                    sub.concluida = marcado
-                    db.commit()
-                    atualizar_progresso_subtarefas(db, tarefa_selecionada)
-                    registrar_acao(db, "Checklist Atualizado", f"Marcou '{sub.nome}' como {'Concluído' if marcado else 'Pendente'}")
-                    db.commit()
-                    st.rerun()
+                c_check, c_del = st.columns([0.9, 0.1])
+                
+                with c_check:
+                    marcado = st.checkbox(f"{sub.nome}", value=sub.concluida, key=f"chk_{sub.id}")
+                    if marcado != sub.concluida:
+                        sub.concluida = marcado
+                        db.commit()
+                        atualizar_progresso_subtarefas(db, tarefa_selecionada)
+                        registrar_acao(db, "Checklist Atualizado", f"Marcou '{sub.nome}' como {'Concluído' if marcado else 'Pendente'}")
+                        db.commit()
+                        st.rerun()
+                        
+                with c_del:
+                    if st.button("🗑️", key=f"del_sub_{sub.id}", help="Excluir esta subtarefa"):
+                        nome_apagado = sub.nome
+                        db.delete(sub)
+                        db.commit()
+                        atualizar_progresso_subtarefas(db, tarefa_selecionada)
+                        registrar_acao(db, "Exclusão de Subtarefa", f"Excluiu a subtarefa '{nome_apagado}'")
+                        db.commit()
+                        st.rerun()
         else:
             st.info("Nenhuma subtarefa cadastrada ainda.")
             
