@@ -31,6 +31,10 @@ class Tarefa(Base):
     nome = Column(String, nullable=False)
     status = Column(String, default="Não iniciada")
     prioridade = Column(String, default="Média")
+    
+    # --- AQUI ESTÁ A COLUNA QUE FALTAVA ---
+    responsavel = Column(String, default="Não atribuído") 
+    
     data_inicio = Column(Date)
     data_termino = Column(Date)
     percentual_concluido = Column(Float, default=0.0)
@@ -39,14 +43,12 @@ class Tarefa(Base):
     fase = relationship("Fase", back_populates="tarefas")
     subtarefas = relationship("Subtarefa", back_populates="tarefa", cascade="all, delete-orphan")
 
-# --- TABELA DE DEPENDÊNCIAS COM AS "PONTES" CORRIGIDAS ---
 class Dependencia(Base):
     __tablename__ = "dependencias"
     id = Column(Integer, primary_key=True, index=True)
     tarefa_predecessora_id = Column(Integer, ForeignKey("tarefas.id", ondelete="CASCADE"))
     tarefa_sucessora_id = Column(Integer, ForeignKey("tarefas.id", ondelete="CASCADE"))
     
-    # Estas duas linhas resolvem o erro! Elas buscam o objeto Tarefa para lermos o .nome
     predecessora = relationship("Tarefa", foreign_keys=[tarefa_predecessora_id])
     sucessora = relationship("Tarefa", foreign_keys=[tarefa_sucessora_id])
 
