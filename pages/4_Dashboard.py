@@ -53,8 +53,8 @@ tarefas_concluidas = sum(1 for t in tarefas if t.status == "Concluída")
 tarefas_atrasadas = sum(1 for t in tarefas if t.data_termino and t.data_termino < hoje and t.status != "Concluída")
 prox_7_dias = sum(1 for t in tarefas if t.data_termino and hoje <= t.data_termino <= hoje + datetime.timedelta(days=7) and t.status != "Concluída")
 
-# Progresso geral (Média simples do % concluído)
-progresso_medio = sum(t.percentual_concluido or 0 for t in tarefas) / total_tarefas if total_tarefas > 0 else 0
+# Progresso geral (Média simples com peso 100 para Concluídas)
+progresso_medio = sum((100 if t.status == "Concluída" else (t.percentual_concluido or 0)) for t in tarefas) / total_tarefas if total_tarefas > 0 else 0
 
 # --- 2. EXIBIÇÃO DOS CARDS (MÉTRICAS) ---
 c1, c2, c3, c4 = st.columns(4)
@@ -97,7 +97,7 @@ for t in tarefas:
         "Prioridade": t.prioridade,
         "Início": t.data_inicio.strftime("%d/%m/%Y") if t.data_inicio else "",
         "Término": t.data_termino.strftime("%d/%m/%Y") if t.data_termino else "",
-        "Avanço Físico (%)": t.percentual_concluido,
+        "Avanço Físico (%)": 100 if t.status == "Concluída" else t.percentual_concluido,
         "É Marco?": "Sim" if t.is_marco else "Não"
     })
 
