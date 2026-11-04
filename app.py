@@ -20,11 +20,7 @@ if "autenticado" not in st.session_state:
     st.session_state["usuario_nome"] = ""
 
 def checar_credenciais(usuario_digitado, senha_digitada):
-    # 1. Fallback de emergência (agora vem primeiro e nunca falha)
-    if usuario_digitado == "admin" and senha_digitada == "hydro123":
-        return True
-        
-    # 2. Tenta ler o arquivo de senhas do Render com segurança
+    # O sistema agora lê APENAS as senhas oficiais cadastradas e ocultas no Render
     try:
         if "usuarios" in st.secrets:
             usuarios_validos = st.secrets["usuarios"]
