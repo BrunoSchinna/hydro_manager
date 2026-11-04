@@ -29,7 +29,6 @@ class Tarefa(Base):
     id = Column(Integer, primary_key=True, index=True)
     fase_id = Column(Integer, ForeignKey("fases.id", ondelete="CASCADE"))
     nome = Column(String, nullable=False)
-    # Coluna 'descricao' removida para evitar erro de banco de dados
     status = Column(String, default="Não iniciada")
     prioridade = Column(String, default="Média")
     data_inicio = Column(Date)
@@ -40,12 +39,12 @@ class Tarefa(Base):
     fase = relationship("Fase", back_populates="tarefas")
     subtarefas = relationship("Subtarefa", back_populates="tarefa", cascade="all, delete-orphan")
 
-# --- TABELA RESTAURADA: DEPENDÊNCIAS DO GANTT ---
+# --- TABELA RESTAURADA COM OS NOMES CORRETOS ---
 class Dependencia(Base):
     __tablename__ = "dependencias"
     id = Column(Integer, primary_key=True, index=True)
-    tarefa_origem_id = Column(Integer, ForeignKey("tarefas.id", ondelete="CASCADE"))
-    tarefa_destino_id = Column(Integer, ForeignKey("tarefas.id", ondelete="CASCADE"))
+    tarefa_predecessora_id = Column(Integer, ForeignKey("tarefas.id", ondelete="CASCADE"))
+    tarefa_sucessora_id = Column(Integer, ForeignKey("tarefas.id", ondelete="CASCADE"))
 
 class Subtarefa(Base):
     __tablename__ = "subtarefas"
@@ -61,7 +60,6 @@ class Responsavel(Base):
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String, nullable=False)
 
-# --- TABELA DE AUDITORIA ---
 class Historico(Base):
     __tablename__ = "historico"
     id = Column(Integer, primary_key=True, index=True)
