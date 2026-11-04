@@ -29,7 +29,6 @@ class Tarefa(Base):
     id = Column(Integer, primary_key=True, index=True)
     fase_id = Column(Integer, ForeignKey("fases.id", ondelete="CASCADE"))
     nome = Column(String, nullable=False)
-    descricao = Column(String)
     status = Column(String, default="Não iniciada")
     prioridade = Column(String, default="Média")
     data_inicio = Column(Date)
