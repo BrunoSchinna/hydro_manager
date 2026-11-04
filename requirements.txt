@@ -5,3 +5,4 @@ plotly>=5.18.0
 streamlit-agraph>=0.0.45
 graphviz>=0.20.1
 openpyxl>=3.1.2
+psycopg2-binary==2.9.9
