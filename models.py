@@ -39,12 +39,16 @@ class Tarefa(Base):
     fase = relationship("Fase", back_populates="tarefas")
     subtarefas = relationship("Subtarefa", back_populates="tarefa", cascade="all, delete-orphan")
 
-# --- TABELA RESTAURADA COM OS NOMES CORRETOS ---
+# --- TABELA DE DEPENDÊNCIAS COM AS "PONTES" CORRIGIDAS ---
 class Dependencia(Base):
     __tablename__ = "dependencias"
     id = Column(Integer, primary_key=True, index=True)
     tarefa_predecessora_id = Column(Integer, ForeignKey("tarefas.id", ondelete="CASCADE"))
     tarefa_sucessora_id = Column(Integer, ForeignKey("tarefas.id", ondelete="CASCADE"))
+    
+    # Estas duas linhas resolvem o erro! Elas buscam o objeto Tarefa para lermos o .nome
+    predecessora = relationship("Tarefa", foreign_keys=[tarefa_predecessora_id])
+    sucessora = relationship("Tarefa", foreign_keys=[tarefa_sucessora_id])
 
 class Subtarefa(Base):
     __tablename__ = "subtarefas"
