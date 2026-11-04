@@ -127,7 +127,7 @@ else:
                 # --- CÁLCULO DE PROGRESSO REAL ---
                 tarefas_projeto = db.query(Tarefa).join(Fase).filter(Fase.projeto_id == proj.id).all()
                 if tarefas_projeto:
-                    media_progresso = sum(t.percentual_concluido or 0 for t in tarefas_projeto) / len(tarefas_projeto)
+                    media_progresso = sum((100 if t.status == "Concluída" else (t.percentual_concluido or 0)) for t in tarefas_projeto) / len(tarefas_projeto)
                 else:
                     media_progresso = 0.0
                 
