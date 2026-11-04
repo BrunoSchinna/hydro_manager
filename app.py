@@ -2,14 +2,27 @@ import streamlit as st
 from database import SessionLocal
 from models import Projeto, Tarefa, Fase
 from services.seed import init_db
+from sqlalchemy import text
 
 # Configuração da página (deve ser o primeiro comando do Streamlit)
 st.set_page_config(page_title="Hydro Manager", page_icon="🌊", layout="wide")
 
-# --- OTIMIZAÇÃO DE PERFORMANCE (CACHE) ---
+# --- OTIMIZAÇÃO DE PERFORMANCE E ATUALIZAÇÃO DO BANCO ---
 @st.cache_resource
 def iniciar_banco_uma_vez():
     init_db()
+    
+    # Script para adicionar a nova coluna de "Responsável" sem apagar os dados antigos
+    db_atualizacao = SessionLocal()
+    try:
+        db_atualizacao.execute(text("ALTER TABLE tarefas ADD COLUMN responsavel VARCHAR DEFAULT 'Não atribuído';"))
+        db_atualizacao.commit()
+    except Exception:
+        # Se a coluna já existir (em reinicializações futuras), ele ignora silenciosamente e segue a vida
+        db_atualizacao.rollback()
+    finally:
+        db_atualizacao.close()
+        
     return True
 
 iniciar_banco_uma_vez()
