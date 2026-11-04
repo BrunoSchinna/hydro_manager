@@ -1,27 +1,21 @@
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-# Configuração do SQLite local
-DATABASE_URL = "sqlite:///hydro_manager.db"
+# 1. Busca a URL do banco nas variáveis de ambiente do Render. 
+# Se não encontrar (rodando no seu PC local), usa o arquivo SQLite padrão.
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./hydro_manager.db")
 
-# Engine do banco de dados com suporte a foreign keys no SQLite
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+# 2. Correção de compatibilidade: o SQLAlchemy exige 'postgresql://' em vez do antigo 'postgres://'
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# Habilitar pragma foreign_keys para SQLite
-from sqlalchemy import event
-@event.listens_for(engine, "connect")
-def set_sqlite_pragma(dbapi_connection, connection_record):
-    cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.close()
+# 3. O SQLite exige um parâmetro especial para evitar erros de thread que o Postgres não precisa
+if "sqlite" in DATABASE_URL:
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(DATABASE_URL)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
 
-def get_db():
-    """Gera uma sessão do banco de dados para ser usada nas operações."""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+Base = declarative_base()
