@@ -86,7 +86,7 @@ with aba_tabela:
                 "Prioridade": t.prioridade,
                 "Início": t.data_inicio,
                 "Término": t.data_termino,
-                "% Concluído": t.percentual_concluido,
+                "% Concluído": float(t.percentual_concluido or 0.0), # Garante que seja sempre um número decimal
                 "Marco?": t.is_marco,
             })
         
@@ -102,7 +102,8 @@ with aba_tabela:
                 "Prioridade": st.column_config.SelectboxColumn("Prioridade", options=["Baixa", "Média", "Alta", "Crítica"]),
                 "Início": st.column_config.DateColumn("Início", format="DD/MM/YYYY"),
                 "Término": st.column_config.DateColumn("Término", format="DD/MM/YYYY"),
-                "% Concluído": st.column_config.ProgressColumn("% Concluído", min_value=0.0, max_value=100.0, format="%f%%"),
+                # Substituímos a barra de progresso por um campo numérico editável de 0 a 100
+                "% Concluído": st.column_config.NumberColumn("% Concluído", min_value=0.0, max_value=100.0, format="%d%%", step=5.0),
             },
             hide_index=True,
             use_container_width=True,
@@ -119,7 +120,14 @@ with aba_tabela:
                     tarefa_db.prioridade = row["Prioridade"]
                     tarefa_db.data_inicio = row["Início"]
                     tarefa_db.data_termino = row["Término"]
-                    tarefa_db.percentual_concluido = row["% Concluído"]
+                    
+                    # --- REGRA INTELIGENTE ---
+                    # Se marcou como concluída, o banco salva 100%. Senão, salva o número que a pessoa digitou.
+                    if row["Status"] == "Concluída":
+                        tarefa_db.percentual_concluido = 100.0
+                    else:
+                        tarefa_db.percentual_concluido = row["% Concluído"]
+                        
                     tarefa_db.is_marco = row["Marco?"]
             db.commit()
             st.success("Alterações salvas com sucesso!")
