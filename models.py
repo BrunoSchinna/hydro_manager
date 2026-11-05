@@ -32,7 +32,6 @@ class Tarefa(Base):
     status = Column(String, default="Não iniciada")
     prioridade = Column(String, default="Média")
     
-    # --- AQUI ESTÁ A COLUNA QUE FALTAVA ---
     responsavel = Column(String, default="Não atribuído") 
     
     data_inicio = Column(Date)
@@ -48,6 +47,9 @@ class Dependencia(Base):
     id = Column(Integer, primary_key=True, index=True)
     tarefa_predecessora_id = Column(Integer, ForeignKey("tarefas.id", ondelete="CASCADE"))
     tarefa_sucessora_id = Column(Integer, ForeignKey("tarefas.id", ondelete="CASCADE"))
+    
+    # --- NOVA COLUNA ADICIONADA AQUI PARA CORRIGIR O ERRO NO GANTT ---
+    tipo = Column(String, default="Fim-Início")
     
     predecessora = relationship("Tarefa", foreign_keys=[tarefa_predecessora_id])
     sucessora = relationship("Tarefa", foreign_keys=[tarefa_sucessora_id])
