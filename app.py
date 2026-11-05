@@ -5,21 +5,30 @@ from services.seed import init_db
 from sqlalchemy import text
 
 # Configuração da página (deve ser o primeiro comando do Streamlit)
-st.set_page_config(page_title="Hydro Manager", page_icon="🌊", layout="wide")
+st.set_page_config(page_title="Organizador da Engenharia", page_icon="🌊", layout="wide")
 
 # --- OTIMIZAÇÃO DE PERFORMANCE E ATUALIZAÇÃO DO BANCO ---
 @st.cache_resource
 def iniciar_banco_uma_vez():
     init_db()
     
-    # Script para adicionar a nova coluna de "Responsável" sem apagar os dados antigos
+    # Script para adicionar novas colunas silenciosamente sem apagar os dados antigos
     db_atualizacao = SessionLocal()
+    
     try:
+        # Tenta adicionar a coluna 'responsavel' nas Tarefas
         db_atualizacao.execute(text("ALTER TABLE tarefas ADD COLUMN responsavel VARCHAR DEFAULT 'Não atribuído';"))
         db_atualizacao.commit()
     except Exception:
-        # Se a coluna já existir (em reinicializações futuras), ele ignora silenciosamente e segue a vida
         db_atualizacao.rollback()
+        
+    try:
+        # Tenta adicionar a coluna 'tipo' nas Dependencias para o Gantt funcionar
+        db_atualizacao.execute(text("ALTER TABLE dependencias ADD COLUMN tipo VARCHAR DEFAULT 'Fim-Início';"))
+        db_atualizacao.commit()
+    except Exception:
+        db_atualizacao.rollback()
+        
     finally:
         db_atualizacao.close()
         
