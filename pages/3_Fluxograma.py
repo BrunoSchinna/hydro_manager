@@ -40,7 +40,7 @@ st.title(f"🕸️ Fluxograma de Dependências: {projeto.nome}")
 
 st.markdown("""
 Aqui você visualiza a rede de dependências do projeto. 
-- Arraste os nós para reorganizar a visualização.
+- O gráfico se organiza automaticamente da esquerda (início) para a direita (fim).
 - Use o scroll do mouse para dar zoom.
 """)
 
@@ -75,7 +75,6 @@ def obter_cor(tarefa):
 
 for t in tarefas:
     cor = obter_cor(t)
-    # Quebra de linha no label para não ficar um texto muito comprido no nó
     label_formatado = f"[{t.fase.nome}]\n{t.nome}"
     
     nodes.append(Node(
@@ -98,16 +97,24 @@ for d in deps_cadastradas:
 if not edges and len(nodes) > 0:
     st.info("As tarefas não possuem dependências criadas ainda. Volte à tela do Gantt para conectá-las.")
 
-# --- CONFIGURAÇÃO E RENDERIZAÇÃO DO GRAFO ---
+# --- CONFIGURAÇÃO E RENDERIZAÇÃO DO GRAFO (CORRIGIDA) ---
 config = Config(
     width="100%",
     height=600,
     directed=True, 
-    physics=True, 
-    hierarchical=False, # Mude para True se quiser uma árvore rígida de cima para baixo
+    physics=False,       # DESLIGADO: Motor de física congelado (fim da tremedeira)
+    hierarchical=True,   # LIGADO: Organização automática em formato de árvore
     nodeHighlightBehavior=True,
     highlightColor="#F7A7A6", 
-    collapsible=False
+    collapsible=False,
+    # Força a direção da árvore da esquerda (Left) para a direita (Right)
+    layout={
+        "hierarchical": {
+            "direction": "LR", 
+            "sortMethod": "directed",
+            "levelSeparation": 200 # Espaçamento horizontal entre os níveis
+        }
+    }
 )
 
 st.divider()
