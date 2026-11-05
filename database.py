@@ -1,6 +1,7 @@
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.pool import NullPool  # <-- A vacina contra engarrafamento de conexões
 
 # 1. Puxa a URL e remove aspas ou espaços vazios
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./hydro_manager.db")
@@ -19,7 +20,8 @@ elif DATABASE_URL.startswith("postgresql://") and not DATABASE_URL.startswith("p
 if "sqlite" in DATABASE_URL:
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 else:
-    engine = create_engine(DATABASE_URL)
+    # AQUI ENTRA A MÁGICA: poolclass=NullPool desliga a retenção de conexões fantasmas!
+    engine = create_engine(DATABASE_URL, poolclass=NullPool)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
