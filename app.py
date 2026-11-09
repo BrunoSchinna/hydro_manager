@@ -50,7 +50,7 @@ def checar_credenciais(usuario_digitado, senha_digitada):
     return False
 
 if not st.session_state["autenticado"]:
-    st.title("🔒 Hydro Manager - Acesso Restrito")
+    st.title("🔒 Gerenciador de Projetos - Acesso Restrito")
     st.write("")
     
     col_vazia1, col_login, col_vazia2 = st.columns([1, 1.2, 1])
@@ -85,7 +85,7 @@ def get_db():
 
 db = get_db()
 
-st.title("🌊 Hydro Manager")
+st.title("🌊 Gerenciador de Projetos Engenharia C-Nível")
 st.write("Gestão de Projetos e Engenharia de Usinas Hidrelétricas")
 
 with st.expander("➕ Novo Projeto", expanded=False):
