@@ -23,7 +23,6 @@ def iniciar_banco_uma_vez():
     except Exception:
         db_atualizacao.rollback()
         
-    # --- NOVO: Tenta criar a tabela de documentos se ela não existir ---
     try:
         Documento.__table__.create(bind=db_atualizacao.get_bind(), checkfirst=True)
     except Exception:
@@ -137,13 +136,38 @@ else:
                 
                 st.progress(int(media_progresso), text=f"Progresso Geral: {int(media_progresso)}%") 
                 
-                # --- NOVA GAVETA DE ANEXOS DO PROJETO ---
+                # --- NOVA ABA DE EDIÇÃO DO PROJETO ---
+                with st.expander("✏️ Editar Projeto"):
+                    with st.form(f"form_edit_proj_{proj.id}", clear_on_submit=False):
+                        edit_nome = st.text_input("Nome", value=proj.nome)
+                        
+                        opcoes_tipo = ["UHE", "PCH", "CGH"]
+                        idx_tipo = opcoes_tipo.index(proj.tipo) if proj.tipo in opcoes_tipo else 0
+                        edit_tipo = st.selectbox("Tipo", opcoes_tipo, index=idx_tipo)
+                        
+                        edit_local = st.text_input("Local (Município/UF)", value=proj.municipio_uf or "")
+                        edit_rio = st.text_input("Rio", value=proj.rio or "")
+                        edit_pot = st.number_input("Potência (MW)", min_value=0.0, format="%.2f", value=float(proj.potencia_mw or 0.0))
+                        
+                        if st.form_submit_button("Salvar Alterações"):
+                            if edit_nome:
+                                proj.nome = edit_nome
+                                proj.tipo = edit_tipo
+                                proj.municipio_uf = edit_local
+                                proj.rio = edit_rio
+                                proj.potencia_mw = edit_pot
+                                db.commit()
+                                st.success("Projeto atualizado!")
+                                st.rerun()
+                            else:
+                                st.error("O nome não pode ficar vazio.")
+                
+                # --- GAVETA DE ANEXOS ---
                 with st.expander("📂 Documentos e Links"):
                     docs = db.query(Documento).filter(Documento.projeto_id == proj.id).all()
                     
                     if docs:
                         for d in docs:
-                            # Monta o link clicável e um botão de lixeira ao lado
                             c_link, c_del = st.columns([0.8, 0.2])
                             c_link.markdown(f"🔗 [{d.nome}]({d.url})")
                             if c_del.button("🗑️", key=f"del_doc_{d.id}", help="Excluir link"):
@@ -166,6 +190,7 @@ else:
                             else:
                                 st.error("Preencha o nome e o link.")
                 
+                # --- BOTÕES DE AÇÃO ---
                 c1, c2 = st.columns(2)
                 if c1.button("Abrir Painel", key=f"abrir_{proj.id}", use_container_width=True):
                     st.session_state['projeto_ativo_id'] = proj.id
