@@ -13,6 +13,8 @@ class Projeto(Base):
     potencia_mw = Column(Float)
     
     fases = relationship("Fase", back_populates="projeto", cascade="all, delete-orphan")
+    # Nova ponte para ligar o projeto aos seus anexos:
+    documentos = relationship("Documento", back_populates="projeto", cascade="all, delete-orphan")
 
 class Fase(Base):
     __tablename__ = "fases"
@@ -48,7 +50,6 @@ class Dependencia(Base):
     tarefa_predecessora_id = Column(Integer, ForeignKey("tarefas.id", ondelete="CASCADE"))
     tarefa_sucessora_id = Column(Integer, ForeignKey("tarefas.id", ondelete="CASCADE"))
     
-    # --- NOVA COLUNA ADICIONADA AQUI PARA CORRIGIR O ERRO NO GANTT ---
     tipo = Column(String, default="Fim-Início")
     
     predecessora = relationship("Tarefa", foreign_keys=[tarefa_predecessora_id])
@@ -75,3 +76,13 @@ class Historico(Base):
     acao = Column(String, nullable=False) 
     detalhes = Column(String)             
     data_hora = Column(DateTime(timezone=True), server_default=func.now())
+
+# --- NOVA TABELA DE ANEXOS ---
+class Documento(Base):
+    __tablename__ = "documentos"
+    id = Column(Integer, primary_key=True, index=True)
+    projeto_id = Column(Integer, ForeignKey("projetos.id", ondelete="CASCADE"))
+    nome = Column(String, nullable=False)
+    url = Column(String, nullable=False)
+    
+    projeto = relationship("Projeto", back_populates="documentos")
