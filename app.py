@@ -1,6 +1,8 @@
 import streamlit as st
+import json
+import datetime
 from database import SessionLocal
-from models import Projeto, Tarefa, Fase, Documento
+from models import Projeto, Tarefa, Fase, Documento, Subtarefa, Dependencia
 from services.seed import init_db
 from sqlalchemy import text
 
@@ -9,28 +11,20 @@ st.set_page_config(page_title="Hydro Manager", page_icon="🌊", layout="wide")
 @st.cache_resource
 def iniciar_banco_uma_vez():
     init_db()
-    
     db_atualizacao = SessionLocal()
     try:
         db_atualizacao.execute(text("ALTER TABLE tarefas ADD COLUMN responsavel VARCHAR DEFAULT 'Não atribuído';"))
         db_atualizacao.commit()
-    except Exception:
-        db_atualizacao.rollback()
-        
+    except: db_atualizacao.rollback()
     try:
         db_atualizacao.execute(text("ALTER TABLE dependencias ADD COLUMN tipo VARCHAR DEFAULT 'Fim-Início';"))
         db_atualizacao.commit()
-    except Exception:
-        db_atualizacao.rollback()
-        
+    except: db_atualizacao.rollback()
     try:
         Documento.__table__.create(bind=db_atualizacao.get_bind(), checkfirst=True)
-    except Exception:
-        pass
-        
+    except: pass
     finally:
         db_atualizacao.close()
-        
     return True
 
 iniciar_banco_uma_vez()
@@ -45,27 +39,21 @@ def checar_credenciais(usuario_digitado, senha_digitada):
             usuarios_validos = st.secrets["usuarios"]
             if usuario_digitado in usuarios_validos and usuarios_validos[usuario_digitado] == senha_digitada:
                 return True
-    except Exception:
-        pass
+    except: pass
     return False
 
 if not st.session_state["autenticado"]:
-    st.title("🔒 Gerenciador de Projetos - Acesso Restrito")
-    st.write("")
-    
+    st.title("🔒 Hydro Manager - Acesso Restrito")
     col_vazia1, col_login, col_vazia2 = st.columns([1, 1.2, 1])
-    
     with col_login:
         with st.container(border=True):
             st.subheader("Login de Colaborador")
             user = st.text_input("Usuário")
             senha = st.text_input("Senha", type="password")
-            
             if st.button("Entrar", type="primary", use_container_width=True):
                 if checar_credenciais(user.strip(), senha.strip()):
                     st.session_state["autenticado"] = True
                     st.session_state["usuario_nome"] = user.strip()
-                    st.success("Autenticado com sucesso!")
                     st.rerun()
                 else:
                     st.error("Usuário ou senha incorretos.")
@@ -85,18 +73,102 @@ def get_db():
 
 db = get_db()
 
-st.title("🌊 Gerenciador de Projetos Engenharia C-Nível")
+# ==========================================
+# MOTOR DE BACKUP (EXPORTAR E IMPORTAR)
+# ==========================================
+def gerar_backup_projeto(db, projeto_id):
+    proj = db.query(Projeto).filter(Projeto.id == projeto_id).first()
+    if not proj: return ""
+    
+    dados = {
+        "projeto": {"nome": proj.nome, "tipo": proj.tipo, "municipio_uf": proj.municipio_uf, "rio": proj.rio, "potencia_mw": proj.potencia_mw},
+        "fases": [], "tarefas": [], "subtarefas": [], "dependencias": [], "documentos": []
+    }
+    
+    fases = db.query(Fase).filter(Fase.projeto_id == projeto_id).all()
+    fase_ids = [f.id for f in fases]
+    for f in fases:
+        dados["fases"].append({"id_antigo": f.id, "nome": f.nome, "ordem": f.ordem})
+        
+    tarefas = db.query(Tarefa).filter(Tarefa.fase_id.in_(fase_ids)).all() if fase_ids else []
+    tarefa_ids = [t.id for t in tarefas]
+    for t in tarefas:
+        dados["tarefas"].append({
+            "id_antigo": t.id, "fase_id_antigo": t.fase_id, "nome": t.nome, "status": t.status, 
+            "prioridade": t.prioridade, "responsavel": t.responsavel,
+            "data_inicio": t.data_inicio.isoformat() if t.data_inicio else None,
+            "data_termino": t.data_termino.isoformat() if t.data_termino else None,
+            "percentual_concluido": t.percentual_concluido, "is_marco": t.is_marco
+        })
+        
+    for s in (db.query(Subtarefa).filter(Subtarefa.tarefa_id.in_(tarefa_ids)).all() if tarefa_ids else []):
+        dados["subtarefas"].append({"tarefa_id_antigo": s.tarefa_id, "nome": s.nome, "concluida": s.concluida})
+        
+    for d in (db.query(Dependencia).filter(Dependencia.tarefa_predecessora_id.in_(tarefa_ids)).all() if tarefa_ids else []):
+        dados["dependencias"].append({"pred_id_antigo": d.tarefa_predecessora_id, "suc_id_antigo": d.tarefa_sucessora_id, "tipo": d.tipo})
+        
+    for doc in db.query(Documento).filter(Documento.projeto_id == projeto_id).all():
+        dados["documentos"].append({"nome": doc.nome, "url": doc.url})
+        
+    return json.dumps(dados, indent=4)
+
+def restaurar_projeto(db, json_string):
+    try:
+        dados = json.loads(json_string)
+        p_data = dados["projeto"]
+        novo_proj = Projeto(nome=p_data["nome"] + " (Restaurado)", tipo=p_data.get("tipo"), municipio_uf=p_data.get("municipio_uf"), rio=p_data.get("rio"), potencia_mw=p_data.get("potencia_mw"))
+        db.add(novo_proj)
+        db.flush()
+        
+        mapa_fases = {}
+        for f in dados.get("fases", []):
+            nova_fase = Fase(projeto_id=novo_proj.id, nome=f["nome"], ordem=f["ordem"])
+            db.add(nova_fase)
+            db.flush()
+            mapa_fases[f["id_antigo"]] = nova_fase.id
+            
+        mapa_tarefas = {}
+        for t in dados.get("tarefas", []):
+            dt_ini = datetime.date.fromisoformat(t["data_inicio"]) if t.get("data_inicio") else None
+            dt_fim = datetime.date.fromisoformat(t["data_termino"]) if t.get("data_termino") else None
+            nova_tar = Tarefa(
+                fase_id=mapa_fases[t["fase_id_antigo"]], nome=t["nome"], status=t["status"],
+                prioridade=t["prioridade"], responsavel=t["responsavel"], data_inicio=dt_ini,
+                data_termino=dt_fim, percentual_concluido=t["percentual_concluido"], is_marco=t["is_marco"]
+            )
+            db.add(nova_tar)
+            db.flush()
+            mapa_tarefas[t["id_antigo"]] = nova_tar.id
+            
+        for s in dados.get("subtarefas", []):
+            db.add(Subtarefa(tarefa_id=mapa_tarefas[s["tarefa_id_antigo"]], nome=s["nome"], concluida=s["concluida"]))
+            
+        for d in dados.get("dependencias", []):
+            db.add(Dependencia(tarefa_predecessora_id=mapa_tarefas[d["pred_id_antigo"]], tarefa_sucessora_id=mapa_tarefas[d["suc_id_antigo"]], tipo=d.get("tipo", "Fim-Início")))
+            
+        for doc in dados.get("documentos", []):
+            db.add(Documento(projeto_id=novo_proj.id, nome=doc["nome"], url=doc["url"]))
+            
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        return False
+# ==========================================
+
+st.title("🌊 Hydro Manager")
 st.write("Gestão de Projetos e Engenharia de Usinas Hidrelétricas")
 
-with st.expander("➕ Novo Projeto", expanded=False):
+col_add, col_import = st.columns(2)
+
+with col_add.expander("➕ Novo Projeto", expanded=False):
     with st.form("form_novo_projeto", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        nome = col1.text_input("Nome do Projeto *")
-        tipo = col2.selectbox("Tipo *", ["UHE", "PCH", "CGH"])
-        rio = col1.text_input("Rio")
-        pot = col2.number_input("Potência (MW)", min_value=0.0, format="%.2f")
+        c1, c2 = st.columns(2)
+        nome = c1.text_input("Nome do Projeto *")
+        tipo = c2.selectbox("Tipo *", ["UHE", "PCH", "CGH"])
+        rio = c1.text_input("Rio")
+        pot = c2.number_input("Potência (MW)", min_value=0.0, format="%.2f")
         usar_template = st.checkbox("Carregar cronograma padrão para Hidrelétricas (14 Fases)", value=True)
-        
         if st.form_submit_button("Salvar Projeto", type="primary"):
             if not nome:
                 st.error("O nome do projeto é obrigatório.")
@@ -104,12 +176,23 @@ with st.expander("➕ Novo Projeto", expanded=False):
                 novo_proj = Projeto(nome=nome, tipo=tipo, rio=rio, potencia_mw=pot)
                 db.add(novo_proj)
                 db.commit()
-                db.refresh(novo_proj)
                 if usar_template:
                     from services.template_hydro import aplicar_template_hydro
                     aplicar_template_hydro(db, novo_proj.id)
-                st.success(f"Projeto {nome} criado com sucesso!")
+                st.success("Projeto criado!")
                 st.rerun()
+
+with col_import.expander("📥 Importar Projeto (.hydro)", expanded=False):
+    st.write("Restaure um projeto salvo anteriormente.")
+    arquivo_upload = st.file_uploader("Selecione o arquivo .hydro", type=["hydro"])
+    if st.button("Restaurar Arquivo"):
+        if arquivo_upload is not None:
+            conteudo = arquivo_upload.read().decode("utf-8")
+            if restaurar_projeto(db, conteudo):
+                st.success("Projeto restaurado com sucesso!")
+                st.rerun()
+            else:
+                st.error("Erro ao ler o arquivo. Ele pode estar corrompido.")
 
 st.divider()
 st.subheader("Projetos Ativos")
@@ -120,83 +203,63 @@ if not projetos:
     st.info("Nenhum projeto encontrado.")
 else:
     cols = st.columns(3)
-    
     for i, proj in enumerate(projetos):
         with cols[i % 3]:
             with st.container(border=True):
                 st.markdown(f"### {proj.nome}")
                 st.write(f"**Tipo:** {proj.tipo} | **Potência:** {proj.potencia_mw} MW")
-                st.write(f"📍 {proj.municipio_uf or 'Local não definido'} - Rio {proj.rio or 'Não definido'}")
+                st.write(f"📍 {proj.municipio_uf or 'Local não definido'}")
                 
                 tarefas_projeto = db.query(Tarefa).join(Fase).filter(Fase.projeto_id == proj.id).all()
-                if tarefas_projeto:
-                    media_progresso = sum((100 if t.status == "Concluída" else (t.percentual_concluido or 0)) for t in tarefas_projeto) / len(tarefas_projeto)
-                else:
-                    media_progresso = 0.0
-                
+                media_progresso = sum((100 if t.status == "Concluída" else (t.percentual_concluido or 0)) for t in tarefas_projeto) / len(tarefas_projeto) if tarefas_projeto else 0.0
                 st.progress(int(media_progresso), text=f"Progresso Geral: {int(media_progresso)}%") 
                 
-                # --- NOVA ABA DE EDIÇÃO DO PROJETO ---
                 with st.expander("✏️ Editar Projeto"):
                     with st.form(f"form_edit_proj_{proj.id}", clear_on_submit=False):
                         edit_nome = st.text_input("Nome", value=proj.nome)
-                        
                         opcoes_tipo = ["UHE", "PCH", "CGH"]
-                        idx_tipo = opcoes_tipo.index(proj.tipo) if proj.tipo in opcoes_tipo else 0
-                        edit_tipo = st.selectbox("Tipo", opcoes_tipo, index=idx_tipo)
-                        
-                        edit_local = st.text_input("Local (Município/UF)", value=proj.municipio_uf or "")
+                        edit_tipo = st.selectbox("Tipo", opcoes_tipo, index=opcoes_tipo.index(proj.tipo) if proj.tipo in opcoes_tipo else 0)
+                        edit_local = st.text_input("Local", value=proj.municipio_uf or "")
                         edit_rio = st.text_input("Rio", value=proj.rio or "")
                         edit_pot = st.number_input("Potência (MW)", min_value=0.0, format="%.2f", value=float(proj.potencia_mw or 0.0))
                         
                         if st.form_submit_button("Salvar Alterações"):
                             if edit_nome:
-                                proj.nome = edit_nome
-                                proj.tipo = edit_tipo
-                                proj.municipio_uf = edit_local
-                                proj.rio = edit_rio
-                                proj.potencia_mw = edit_pot
+                                proj.nome, proj.tipo, proj.municipio_uf, proj.rio, proj.potencia_mw = edit_nome, edit_tipo, edit_local, edit_rio, edit_pot
                                 db.commit()
-                                st.success("Projeto atualizado!")
                                 st.rerun()
-                            else:
-                                st.error("O nome não pode ficar vazio.")
                 
-                # --- GAVETA DE ANEXOS ---
                 with st.expander("📂 Documentos e Links"):
-                    docs = db.query(Documento).filter(Documento.projeto_id == proj.id).all()
-                    
-                    if docs:
-                        for d in docs:
-                            c_link, c_del = st.columns([0.8, 0.2])
-                            c_link.markdown(f"🔗 [{d.nome}]({d.url})")
-                            if c_del.button("🗑️", key=f"del_doc_{d.id}", help="Excluir link"):
-                                db.delete(d)
-                                db.commit()
-                                st.rerun()
-                    else:
-                        st.caption("Nenhum anexo salvo ainda.")
-                        
+                    for d in db.query(Documento).filter(Documento.projeto_id == proj.id).all():
+                        c_link, c_del = st.columns([0.8, 0.2])
+                        c_link.markdown(f"🔗 [{d.nome}]({d.url})")
+                        if c_del.button("🗑️", key=f"del_doc_{d.id}"):
+                            db.delete(d)
+                            db.commit()
+                            st.rerun()
                     with st.form(f"form_doc_{proj.id}", clear_on_submit=True):
-                        st.write("**Novo Anexo**")
-                        doc_nome = st.text_input("Nome (Ex: Planta Baixa)", key=f"nome_doc_{proj.id}")
-                        doc_url = st.text_input("Link (G. Drive, OneDrive)", key=f"url_doc_{proj.id}")
-                        if st.form_submit_button("Salvar Link"):
-                            if doc_nome and doc_url:
-                                novo_doc = Documento(projeto_id=proj.id, nome=doc_nome, url=doc_url)
-                                db.add(novo_doc)
-                                db.commit()
-                                st.rerun()
-                            else:
-                                st.error("Preencha o nome e o link.")
-                
-                # --- BOTÕES DE AÇÃO ---
-                c1, c2 = st.columns(2)
-                if c1.button("Abrir Painel", key=f"abrir_{proj.id}", use_container_width=True):
+                        doc_nome = st.text_input("Nome (Ex: Planta)", key=f"nome_doc_{proj.id}")
+                        doc_url = st.text_input("Link", key=f"url_doc_{proj.id}")
+                        if st.form_submit_button("Salvar Link") and doc_nome and doc_url:
+                            db.add(Documento(projeto_id=proj.id, nome=doc_nome, url=doc_url))
+                            db.commit()
+                            st.rerun()
+
+                c_painel, c_del, c_down = st.columns([1, 1, 1])
+                if c_painel.button("Abrir", key=f"abrir_{proj.id}", use_container_width=True):
                     st.session_state['projeto_ativo_id'] = proj.id
                     st.switch_page("pages/1_Painel_de_Tarefas.py")
-                    
-                if c2.button("Excluir", key=f"del_{proj.id}", use_container_width=True):
+                if c_del.button("Excluir", key=f"del_{proj.id}", use_container_width=True):
                     db.delete(proj)
                     db.commit()
                     st.rerun()
+                    
+                # BOTÃO DE DOWNLOAD DO BACKUP
+                json_backup = gerar_backup_projeto(db, proj.id)
+                c_down.download_button(
+                    label="⬇️ Salvar",
+                    data=json_backup,
+                    file_name=f"{proj.nome.replace(' ', '_')}.hydro",
+                    mime="application/json",
+                    use_container_width=True
+                )
