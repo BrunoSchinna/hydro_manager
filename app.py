@@ -1,33 +1,33 @@
 import streamlit as st
 from database import SessionLocal
-from models import Projeto, Tarefa, Fase
+from models import Projeto, Tarefa, Fase, Documento
 from services.seed import init_db
 from sqlalchemy import text
 
-# Configuração da página (deve ser o primeiro comando do Streamlit)
-st.set_page_config(page_title="Organizador da Engenharia", page_icon="🌊", layout="wide")
+st.set_page_config(page_title="Hydro Manager", page_icon="🌊", layout="wide")
 
-# --- OTIMIZAÇÃO DE PERFORMANCE E ATUALIZAÇÃO DO BANCO ---
 @st.cache_resource
 def iniciar_banco_uma_vez():
     init_db()
     
-    # Script para adicionar novas colunas silenciosamente sem apagar os dados antigos
     db_atualizacao = SessionLocal()
-    
     try:
-        # Tenta adicionar a coluna 'responsavel' nas Tarefas
         db_atualizacao.execute(text("ALTER TABLE tarefas ADD COLUMN responsavel VARCHAR DEFAULT 'Não atribuído';"))
         db_atualizacao.commit()
     except Exception:
         db_atualizacao.rollback()
         
     try:
-        # Tenta adicionar a coluna 'tipo' nas Dependencias para o Gantt funcionar
         db_atualizacao.execute(text("ALTER TABLE dependencias ADD COLUMN tipo VARCHAR DEFAULT 'Fim-Início';"))
         db_atualizacao.commit()
     except Exception:
         db_atualizacao.rollback()
+        
+    # --- NOVO: Tenta criar a tabela de documentos se ela não existir ---
+    try:
+        Documento.__table__.create(bind=db_atualizacao.get_bind(), checkfirst=True)
+    except Exception:
+        pass
         
     finally:
         db_atualizacao.close()
@@ -36,24 +36,20 @@ def iniciar_banco_uma_vez():
 
 iniciar_banco_uma_vez()
 
-# --- CONTROLE DE SESSÃO / AUTENTICAÇÃO ---
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
     st.session_state["usuario_nome"] = ""
 
 def checar_credenciais(usuario_digitado, senha_digitada):
-    # O sistema agora lê APENAS as senhas oficiais cadastradas e ocultas no Render
     try:
         if "usuarios" in st.secrets:
             usuarios_validos = st.secrets["usuarios"]
             if usuario_digitado in usuarios_validos and usuarios_validos[usuario_digitado] == senha_digitada:
                 return True
     except Exception:
-        pass # Se o arquivo não existir, o sistema ignora o erro sem "crashar"
-        
+        pass
     return False
 
-# Tela de Login (bloqueia o resto do app se não estiver logado)
 if not st.session_state["autenticado"]:
     st.title("🔒 Hydro Manager - Acesso Restrito")
     st.write("")
@@ -74,12 +70,8 @@ if not st.session_state["autenticado"]:
                     st.rerun()
                 else:
                     st.error("Usuário ou senha incorretos.")
-                    
     st.stop()
 
-# --- INTERFACE DA TELA INICIAL (SISTEMA LIBERADO) ---
-
-# Barra lateral
 with st.sidebar:
     st.write(f"👤 Conectado como: **{st.session_state['usuario_nome']}**")
     if st.button("🚪 Sair (Logout)", use_container_width=True):
@@ -87,20 +79,16 @@ with st.sidebar:
         st.session_state["usuario_nome"] = ""
         st.rerun()
 
-# Função auxiliar para gerenciar a conexão com o banco
 def get_db():
     db = SessionLocal()
-    try:
-        return db
-    finally:
-        db.close()
+    try: return db
+    finally: db.close()
 
 db = get_db()
 
 st.title("🌊 Hydro Manager")
 st.write("Gestão de Projetos e Engenharia de Usinas Hidrelétricas")
 
-# Formulário para criar novo projeto
 with st.expander("➕ Novo Projeto", expanded=False):
     with st.form("form_novo_projeto", clear_on_submit=True):
         col1, col2 = st.columns(2)
@@ -108,12 +96,9 @@ with st.expander("➕ Novo Projeto", expanded=False):
         tipo = col2.selectbox("Tipo *", ["UHE", "PCH", "CGH"])
         rio = col1.text_input("Rio")
         pot = col2.number_input("Potência (MW)", min_value=0.0, format="%.2f")
-        
         usar_template = st.checkbox("Carregar cronograma padrão para Hidrelétricas (14 Fases)", value=True)
         
-        submit = st.form_submit_button("Salvar Projeto", type="primary")
-        
-        if submit:
+        if st.form_submit_button("Salvar Projeto", type="primary"):
             if not nome:
                 st.error("O nome do projeto é obrigatório.")
             else:
@@ -121,11 +106,9 @@ with st.expander("➕ Novo Projeto", expanded=False):
                 db.add(novo_proj)
                 db.commit()
                 db.refresh(novo_proj)
-                
                 if usar_template:
                     from services.template_hydro import aplicar_template_hydro
                     aplicar_template_hydro(db, novo_proj.id)
-                
                 st.success(f"Projeto {nome} criado com sucesso!")
                 st.rerun()
 
@@ -146,7 +129,6 @@ else:
                 st.write(f"**Tipo:** {proj.tipo} | **Potência:** {proj.potencia_mw} MW")
                 st.write(f"📍 {proj.municipio_uf or 'Local não definido'} - Rio {proj.rio or 'Não definido'}")
                 
-                # --- CÁLCULO DE PROGRESSO REAL ---
                 tarefas_projeto = db.query(Tarefa).join(Fase).filter(Fase.projeto_id == proj.id).all()
                 if tarefas_projeto:
                     media_progresso = sum((100 if t.status == "Concluída" else (t.percentual_concluido or 0)) for t in tarefas_projeto) / len(tarefas_projeto)
@@ -154,6 +136,35 @@ else:
                     media_progresso = 0.0
                 
                 st.progress(int(media_progresso), text=f"Progresso Geral: {int(media_progresso)}%") 
+                
+                # --- NOVA GAVETA DE ANEXOS DO PROJETO ---
+                with st.expander("📂 Documentos e Links"):
+                    docs = db.query(Documento).filter(Documento.projeto_id == proj.id).all()
+                    
+                    if docs:
+                        for d in docs:
+                            # Monta o link clicável e um botão de lixeira ao lado
+                            c_link, c_del = st.columns([0.8, 0.2])
+                            c_link.markdown(f"🔗 [{d.nome}]({d.url})")
+                            if c_del.button("🗑️", key=f"del_doc_{d.id}", help="Excluir link"):
+                                db.delete(d)
+                                db.commit()
+                                st.rerun()
+                    else:
+                        st.caption("Nenhum anexo salvo ainda.")
+                        
+                    with st.form(f"form_doc_{proj.id}", clear_on_submit=True):
+                        st.write("**Novo Anexo**")
+                        doc_nome = st.text_input("Nome (Ex: Planta Baixa)", key=f"nome_doc_{proj.id}")
+                        doc_url = st.text_input("Link (G. Drive, OneDrive)", key=f"url_doc_{proj.id}")
+                        if st.form_submit_button("Salvar Link"):
+                            if doc_nome and doc_url:
+                                novo_doc = Documento(projeto_id=proj.id, nome=doc_nome, url=doc_url)
+                                db.add(novo_doc)
+                                db.commit()
+                                st.rerun()
+                            else:
+                                st.error("Preencha o nome e o link.")
                 
                 c1, c2 = st.columns(2)
                 if c1.button("Abrir Painel", key=f"abrir_{proj.id}", use_container_width=True):
