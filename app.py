@@ -10,27 +10,35 @@ st.set_page_config(page_title="Hydro Manager", page_icon="🌊", layout="wide")
 
 @st.cache_resource
 def iniciar_banco_uma_vez():
-    init_db()
     db_atualizacao = SessionLocal()
+    
+    # 1º PASSO: INJETAR AS COLUNAS ANTES DE QUALQUER BUSCA NO BANCO
     try:
         db_atualizacao.execute(text("ALTER TABLE tarefas ADD COLUMN responsavel VARCHAR DEFAULT 'Não atribuído';"))
         db_atualizacao.commit()
     except: db_atualizacao.rollback()
+    
     try:
         db_atualizacao.execute(text("ALTER TABLE dependencias ADD COLUMN tipo VARCHAR DEFAULT 'Fim-Início';"))
         db_atualizacao.commit()
     except: db_atualizacao.rollback()
+    
     try:
-        Documento.__table__.create(bind=db_atualizacao.get_bind(), checkfirst=True)
-    except: pass
-    try:
-        # --- INJETA A NOVA COLUNA DE PROJETOS CONCLUÍDOS SEM APAGAR DADOS ---
+        # Cria a coluna concluido antes do init_db() tentar buscar os projetos!
         db_atualizacao.execute(text("ALTER TABLE projetos ADD COLUMN concluido BOOLEAN DEFAULT FALSE;"))
         db_atualizacao.commit()
     except: db_atualizacao.rollback()
     
+    try:
+        Documento.__table__.create(bind=db_atualizacao.get_bind(), checkfirst=True)
+    except: pass
+    
     finally:
         db_atualizacao.close()
+        
+    # 2º PASSO: AGORA SIM, COM O BANCO PRONTO, RODAMOS A INICIALIZAÇÃO
+    init_db()
+    
     return True
 
 iniciar_banco_uma_vez()
@@ -226,7 +234,6 @@ def renderizar_projetos(lista_projetos, eh_concluido=False):
                 tarefas_projeto = db.query(Tarefa).join(Fase).filter(Fase.projeto_id == proj.id).all()
                 media_progresso = sum((100 if t.status == "Concluída" else (t.percentual_concluido or 0)) for t in tarefas_projeto) / len(tarefas_projeto) if tarefas_projeto else 0.0
                 
-                # Se estiver na aba concluídos, forçamos a barrinha verde no talo visualmente
                 cor_barra = "green" if eh_concluido else "blue"
                 st.progress(100 if eh_concluido else int(media_progresso), text=f"Progresso Geral: {100 if eh_concluido else int(media_progresso)}%") 
                 
