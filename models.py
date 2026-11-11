@@ -12,8 +12,10 @@ class Projeto(Base):
     rio = Column(String)
     potencia_mw = Column(Float)
     
+    # --- NOVA COLUNA: Define se o projeto foi para o arquivo morto ---
+    concluido = Column(Boolean, default=False)
+    
     fases = relationship("Fase", back_populates="projeto", cascade="all, delete-orphan")
-    # Nova ponte para ligar o projeto aos seus anexos:
     documentos = relationship("Documento", back_populates="projeto", cascade="all, delete-orphan")
 
 class Fase(Base):
@@ -77,7 +79,6 @@ class Historico(Base):
     detalhes = Column(String)             
     data_hora = Column(DateTime(timezone=True), server_default=func.now())
 
-# --- NOVA TABELA DE ANEXOS ---
 class Documento(Base):
     __tablename__ = "documentos"
     id = Column(Integer, primary_key=True, index=True)
