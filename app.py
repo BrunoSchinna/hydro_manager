@@ -23,6 +23,12 @@ def iniciar_banco_uma_vez():
     try:
         Documento.__table__.create(bind=db_atualizacao.get_bind(), checkfirst=True)
     except: pass
+    try:
+        # --- INJETA A NOVA COLUNA DE PROJETOS CONCLUÍDOS SEM APAGAR DADOS ---
+        db_atualizacao.execute(text("ALTER TABLE projetos ADD COLUMN concluido BOOLEAN DEFAULT FALSE;"))
+        db_atualizacao.commit()
+    except: db_atualizacao.rollback()
+    
     finally:
         db_atualizacao.close()
     return True
@@ -81,7 +87,10 @@ def gerar_backup_projeto(db, projeto_id):
     if not proj: return ""
     
     dados = {
-        "projeto": {"nome": proj.nome, "tipo": proj.tipo, "municipio_uf": proj.municipio_uf, "rio": proj.rio, "potencia_mw": proj.potencia_mw},
+        "projeto": {
+            "nome": proj.nome, "tipo": proj.tipo, "municipio_uf": proj.municipio_uf, 
+            "rio": proj.rio, "potencia_mw": proj.potencia_mw, "concluido": getattr(proj, "concluido", False)
+        },
         "fases": [], "tarefas": [], "subtarefas": [], "dependencias": [], "documentos": []
     }
     
@@ -116,7 +125,11 @@ def restaurar_projeto(db, json_string):
     try:
         dados = json.loads(json_string)
         p_data = dados["projeto"]
-        novo_proj = Projeto(nome=p_data["nome"] + " (Restaurado)", tipo=p_data.get("tipo"), municipio_uf=p_data.get("municipio_uf"), rio=p_data.get("rio"), potencia_mw=p_data.get("potencia_mw"))
+        novo_proj = Projeto(
+            nome=p_data["nome"] + " (Restaurado)", tipo=p_data.get("tipo"), 
+            municipio_uf=p_data.get("municipio_uf"), rio=p_data.get("rio"), 
+            potencia_mw=p_data.get("potencia_mw"), concluido=p_data.get("concluido", False)
+        )
         db.add(novo_proj)
         db.flush()
         
@@ -195,15 +208,15 @@ with col_import.expander("📥 Importar Projeto (.hydro)", expanded=False):
                 st.error("Erro ao ler o arquivo. Ele pode estar corrompido.")
 
 st.divider()
-st.subheader("Projetos Ativos")
 
-projetos = db.query(Projeto).all()
-
-if not projetos:
-    st.info("Nenhum projeto encontrado.")
-else:
+# --- FUNÇÃO PARA RENDERIZAR OS CARTÕES DOS PROJETOS ---
+def renderizar_projetos(lista_projetos, eh_concluido=False):
+    if not lista_projetos:
+        st.info("Nenhum projeto encontrado nesta aba.")
+        return
+        
     cols = st.columns(3)
-    for i, proj in enumerate(projetos):
+    for i, proj in enumerate(lista_projetos):
         with cols[i % 3]:
             with st.container(border=True):
                 st.markdown(f"### {proj.nome}")
@@ -212,7 +225,10 @@ else:
                 
                 tarefas_projeto = db.query(Tarefa).join(Fase).filter(Fase.projeto_id == proj.id).all()
                 media_progresso = sum((100 if t.status == "Concluída" else (t.percentual_concluido or 0)) for t in tarefas_projeto) / len(tarefas_projeto) if tarefas_projeto else 0.0
-                st.progress(int(media_progresso), text=f"Progresso Geral: {int(media_progresso)}%") 
+                
+                # Se estiver na aba concluídos, forçamos a barrinha verde no talo visualmente
+                cor_barra = "green" if eh_concluido else "blue"
+                st.progress(100 if eh_concluido else int(media_progresso), text=f"Progresso Geral: {100 if eh_concluido else int(media_progresso)}%") 
                 
                 with st.expander("✏️ Editar Projeto"):
                     with st.form(f"form_edit_proj_{proj.id}", clear_on_submit=False):
@@ -245,12 +261,18 @@ else:
                             db.commit()
                             st.rerun()
 
-                c_painel, c_del, c_down = st.columns([1, 1, 1])
+                # --- BOTÕES DE AÇÃO: 4 COLUNAS APERTADINHAS PARA CABER TUDO ---
+                c_painel, c_arq, c_down, c_del = st.columns([1.2, 1.2, 1, 1])
+                
                 if c_painel.button("Abrir", key=f"abrir_{proj.id}", use_container_width=True):
                     st.session_state['projeto_ativo_id'] = proj.id
                     st.switch_page("pages/1_Painel_de_Tarefas.py")
-                if c_del.button("Excluir", key=f"del_{proj.id}", use_container_width=True):
-                    db.delete(proj)
+                    
+                # Botão Dinâmico: Finalizar ou Reabrir
+                txt_botao = "Reabrir" if eh_concluido else "Finalizar"
+                icone = "🔄" if eh_concluido else "✅"
+                if c_arq.button(f"{icone} {txt_botao}", key=f"arq_{proj.id}", use_container_width=True):
+                    proj.concluido = not proj.concluido
                     db.commit()
                     st.rerun()
                     
@@ -263,3 +285,20 @@ else:
                     mime="application/json",
                     use_container_width=True
                 )
+                
+                if c_del.button("Excluir", key=f"del_{proj.id}", use_container_width=True):
+                    db.delete(proj)
+                    db.commit()
+                    st.rerun()
+
+# --- BUSCA E DIVISÃO EM ABAS ---
+projetos_ativos = db.query(Projeto).filter(Projeto.concluido == False).all()
+projetos_concluidos = db.query(Projeto).filter(Projeto.concluido == True).all()
+
+aba_ativos, aba_concluidos = st.tabs(["🏗️ Projetos Ativos", "✅ Projetos Concluídos"])
+
+with aba_ativos:
+    renderizar_projetos(projetos_ativos, eh_concluido=False)
+
+with aba_concluidos:
+    renderizar_projetos(projetos_concluidos, eh_concluido=True)
