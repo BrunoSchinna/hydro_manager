@@ -43,6 +43,7 @@ def iniciar_banco_uma_vez():
 
 iniciar_banco_uma_vez()
 
+# --- AUTENTICAÇÃO ---
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
     st.session_state["usuario_nome"] = ""
@@ -190,10 +191,10 @@ with col_add.expander("➕ Novo Projeto", expanded=False):
         rio = c1.text_input("Rio")
         pot = c2.number_input("Potência (MW)", min_value=0.0, format="%.2f")
         
-        # --- AQUI ESTÁ O NOVO MENU DE TEMPLATES ---
+        # --- MENU DE TEMPLATES ATUALIZADO ---
         opcao_template = st.selectbox(
             "Carregar Estrutura Automática", 
-            ["Projeto Básico (Com tarefas e capítulos)", "Cronograma Padrão Completo", "Nenhum (Criar do zero)"]
+            ["Projeto Básico (Com tarefas e capítulos)", "Outorga D'água", "Cronograma Padrão Completo", "Nenhum (Criar do zero)"]
         )
         
         if st.form_submit_button("Salvar Projeto", type="primary"):
