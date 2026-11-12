@@ -189,7 +189,13 @@ with col_add.expander("➕ Novo Projeto", expanded=False):
         tipo = c2.selectbox("Tipo *", ["UHE", "PCH", "CGH"])
         rio = c1.text_input("Rio")
         pot = c2.number_input("Potência (MW)", min_value=0.0, format="%.2f")
-        usar_template = st.checkbox("Carregar cronograma padrão para Hidrelétricas (14 Fases)", value=True)
+        
+        # --- AQUI ESTÁ O NOVO MENU DE TEMPLATES ---
+        opcao_template = st.selectbox(
+            "Carregar Estrutura Automática", 
+            ["Projeto Básico (Com tarefas e capítulos)", "Cronograma Padrão Completo", "Nenhum (Criar do zero)"]
+        )
+        
         if st.form_submit_button("Salvar Projeto", type="primary"):
             if not nome:
                 st.error("O nome do projeto é obrigatório.")
@@ -197,9 +203,13 @@ with col_add.expander("➕ Novo Projeto", expanded=False):
                 novo_proj = Projeto(nome=nome, tipo=tipo, rio=rio, potencia_mw=pot)
                 db.add(novo_proj)
                 db.commit()
-                if usar_template:
+                db.refresh(novo_proj)
+                
+                # Só roda o script se o usuário não escolheu "Nenhum"
+                if opcao_template != "Nenhum (Criar do zero)":
                     from services.template_hydro import aplicar_template_hydro
-                    aplicar_template_hydro(db, novo_proj.id)
+                    aplicar_template_hydro(db, novo_proj.id, opcao_template)
+                    
                 st.success("Projeto criado!")
                 st.rerun()
 
