@@ -1,6 +1,8 @@
 import streamlit as st
 import json
 import datetime
+import csv
+import io
 from database import SessionLocal
 from models import Projeto, Tarefa, Fase, Documento, Subtarefa, Dependencia
 from services.seed import init_db
@@ -173,6 +175,41 @@ def restaurar_projeto(db, json_string):
     except Exception as e:
         db.rollback()
         return False
+
+# ==========================================
+# MOTOR DE RELATÓRIO EXCEL (CSV)
+# ==========================================
+def gerar_relatorio_excel(db, projeto_id):
+    proj = db.query(Projeto).filter(Projeto.id == projeto_id).first()
+    fases = db.query(Fase).filter(Fase.projeto_id == projeto_id).order_by(Fase.ordem).all()
+    
+    output = io.StringIO()
+    # Ponto e vírgula é o padrão para o Excel no Brasil ler as colunas automaticamente
+    writer = csv.writer(output, delimiter=';') 
+    
+    # Cabeçalho da planilha
+    writer.writerow(["Obra", "Fase", "Tarefa", "Status", "Prioridade", "Responsável", "Data Início", "Data Término", "Progresso"])
+    
+    for f in fases:
+        tarefas = db.query(Tarefa).filter(Tarefa.fase_id == f.id).all()
+        for t in tarefas:
+            dt_ini = t.data_inicio.strftime("%d/%m/%Y") if t.data_inicio else "-"
+            dt_fim = t.data_termino.strftime("%d/%m/%Y") if t.data_termino else "-"
+            
+            writer.writerow([
+                proj.nome, 
+                f.nome, 
+                t.nome, 
+                t.status, 
+                t.prioridade, 
+                t.responsavel, 
+                dt_ini, 
+                dt_fim, 
+                f"{t.percentual_concluido or 0}%"
+            ])
+            
+    # utf-8-sig força o Excel a manter todos os acentos e 'ç' do português intactos
+    return output.getvalue().encode('utf-8-sig')
 # ==========================================
 
 st.title("🌊 Hydro Manager")
@@ -229,7 +266,6 @@ def renderizar_projetos(lista_projetos, eh_concluido=False):
         st.info("Nenhum projeto encontrado nesta aba.")
         return
         
-    # 🔒 VERIFICA SE QUEM ESTÁ LOGADO É O ADMIN
     eh_admin = st.session_state.get("usuario_nome", "").lower() == "admin"
         
     cols = st.columns(3)
@@ -243,7 +279,6 @@ def renderizar_projetos(lista_projetos, eh_concluido=False):
                 tarefas_projeto = db.query(Tarefa).join(Fase).filter(Fase.projeto_id == proj.id).all()
                 media_progresso = sum((100 if t.status == "Concluída" else (t.percentual_concluido or 0)) for t in tarefas_projeto) / len(tarefas_projeto) if tarefas_projeto else 0.0
                 
-                cor_barra = "green" if eh_concluido else "blue"
                 st.progress(100 if eh_concluido else int(media_progresso), text=f"Progresso Geral: {100 if eh_concluido else int(media_progresso)}%") 
                 
                 with st.expander("✏️ Editar Projeto"):
@@ -265,8 +300,6 @@ def renderizar_projetos(lista_projetos, eh_concluido=False):
                     for d in db.query(Documento).filter(Documento.projeto_id == proj.id).all():
                         c_link, c_del = st.columns([0.8, 0.2])
                         c_link.markdown(f"🔗 [{d.nome}]({d.url})")
-                        
-                        # 🔒 TRAVA NA LIXEIRA DO DOCUMENTO
                         if c_del.button("🗑️", key=f"del_doc_{d.id}", disabled=not eh_admin, help="Apenas Admin pode excluir" if not eh_admin else None):
                             db.delete(d)
                             db.commit()
@@ -280,7 +313,8 @@ def renderizar_projetos(lista_projetos, eh_concluido=False):
                             db.commit()
                             st.rerun()
 
-                c_painel, c_arq, c_down, c_del = st.columns([1.2, 1.2, 1, 1])
+                # --- BOTÕES DE AÇÃO COM O NOVO BOTÃO EXCEL ---
+                c_painel, c_arq, c_xls, c_down, c_del = st.columns([1, 1.1, 1, 1, 1])
                 
                 if c_painel.button("Abrir", key=f"abrir_{proj.id}", use_container_width=True):
                     st.session_state['projeto_ativo_id'] = proj.id
@@ -293,6 +327,17 @@ def renderizar_projetos(lista_projetos, eh_concluido=False):
                     db.commit()
                     st.rerun()
                     
+                # NOVO BOTÃO EXCEL (Relatório em Tabela)
+                dados_excel = gerar_relatorio_excel(db, proj.id)
+                c_xls.download_button(
+                    label="📊 Excel",
+                    data=dados_excel,
+                    file_name=f"{proj.nome.replace(' ', '_')}_Relatorio.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                
+                # BOTÃO DE BACKUP .HYDRO (Restaurável)
                 json_backup = gerar_backup_projeto(db, proj.id)
                 c_down.download_button(
                     label="⬇️ Salvar",
@@ -302,7 +347,6 @@ def renderizar_projetos(lista_projetos, eh_concluido=False):
                     use_container_width=True
                 )
                 
-                # 🔒 TRAVA NO BOTÃO EXCLUIR PROJETO
                 if c_del.button("Excluir", key=f"del_{proj.id}", use_container_width=True, disabled=not eh_admin, help="Apenas administradores podem excluir projetos." if not eh_admin else None):
                     db.delete(proj)
                     db.commit()
