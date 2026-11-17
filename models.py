@@ -12,7 +12,6 @@ class Projeto(Base):
     rio = Column(String)
     potencia_mw = Column(Float)
     
-    # --- NOVA COLUNA: Define se o projeto foi para o arquivo morto ---
     concluido = Column(Boolean, default=False)
     
     fases = relationship("Fase", back_populates="projeto", cascade="all, delete-orphan")
@@ -84,6 +83,9 @@ class Documento(Base):
     id = Column(Integer, primary_key=True, index=True)
     projeto_id = Column(Integer, ForeignKey("projetos.id", ondelete="CASCADE"))
     nome = Column(String, nullable=False)
-    url = Column(String, nullable=False)
+    url = Column(String, nullable=True)  # <-- Alterado para permitir prints sem link
+    
+    # --- NOVA COLUNA: Guarda a imagem convertida em texto ---
+    arquivo_base64 = Column(String, nullable=True)
     
     projeto = relationship("Projeto", back_populates="documentos")
