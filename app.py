@@ -3,6 +3,7 @@ import json
 import datetime
 import csv
 import io
+import base64
 from database import SessionLocal
 from models import Projeto, Tarefa, Fase, Documento, Subtarefa, Dependencia
 from services.seed import init_db
@@ -32,6 +33,12 @@ def iniciar_banco_uma_vez():
     try:
         Documento.__table__.create(bind=db_atualizacao.get_bind(), checkfirst=True)
     except: pass
+    
+    # Injeção da nova coluna de imagens (Base64)
+    try:
+        db_atualizacao.execute(text("ALTER TABLE documentos ADD COLUMN arquivo_base64 VARCHAR;"))
+        db_atualizacao.commit()
+    except: db_atualizacao.rollback()
     
     finally:
         db_atualizacao.close()
@@ -74,7 +81,11 @@ if not st.session_state["autenticado"]:
     st.stop()
 
 with st.sidebar:
-    st.write(f"👤 Conectado como: **{st.session_state['usuario_nome']}**")
+    # Mostra uma coroa se for o admin!
+    eh_admin_logado = st.session_state["usuario_nome"].lower() == "admin"
+    icone_usuario = "👑" if eh_admin_logado else "👤"
+    
+    st.write(f"{icone_usuario} Conectado como: **{st.session_state['usuario_nome']}**")
     if st.button("🚪 Sair (Logout)", use_container_width=True):
         st.session_state["autenticado"] = False
         st.session_state["usuario_nome"] = ""
@@ -125,7 +136,11 @@ def gerar_backup_projeto(db, projeto_id):
         dados["dependencias"].append({"pred_id_antigo": d.tarefa_predecessora_id, "suc_id_antigo": d.tarefa_sucessora_id, "tipo": d.tipo})
         
     for doc in db.query(Documento).filter(Documento.projeto_id == projeto_id).all():
-        dados["documentos"].append({"nome": doc.nome, "url": doc.url})
+        dados["documentos"].append({
+            "nome": doc.nome, 
+            "url": doc.url,
+            "arquivo_base64": getattr(doc, "arquivo_base64", None)
+        })
         
     return json.dumps(dados, indent=4)
 
@@ -168,7 +183,12 @@ def restaurar_projeto(db, json_string):
             db.add(Dependencia(tarefa_predecessora_id=mapa_tarefas[d["pred_id_antigo"]], tarefa_sucessora_id=mapa_tarefas[d["suc_id_antigo"]], tipo=d.get("tipo", "Fim-Início")))
             
         for doc in dados.get("documentos", []):
-            db.add(Documento(projeto_id=novo_proj.id, nome=doc["nome"], url=doc["url"]))
+            db.add(Documento(
+                projeto_id=novo_proj.id, 
+                nome=doc["nome"], 
+                url=doc.get("url"),
+                arquivo_base64=doc.get("arquivo_base64")
+            ))
             
         db.commit()
         return True
@@ -184,10 +204,8 @@ def gerar_relatorio_excel(db, projeto_id):
     fases = db.query(Fase).filter(Fase.projeto_id == projeto_id).order_by(Fase.ordem).all()
     
     output = io.StringIO()
-    # Ponto e vírgula é o padrão para o Excel no Brasil ler as colunas automaticamente
     writer = csv.writer(output, delimiter=';') 
     
-    # Cabeçalho da planilha
     writer.writerow(["Obra", "Fase", "Tarefa", "Status", "Prioridade", "Responsável", "Data Início", "Data Término", "Progresso"])
     
     for f in fases:
@@ -197,18 +215,10 @@ def gerar_relatorio_excel(db, projeto_id):
             dt_fim = t.data_termino.strftime("%d/%m/%Y") if t.data_termino else "-"
             
             writer.writerow([
-                proj.nome, 
-                f.nome, 
-                t.nome, 
-                t.status, 
-                t.prioridade, 
-                t.responsavel, 
-                dt_ini, 
-                dt_fim, 
-                f"{t.percentual_concluido or 0}%"
+                proj.nome, f.nome, t.nome, t.status, t.prioridade, 
+                t.responsavel, dt_ini, dt_fim, f"{t.percentual_concluido or 0}%"
             ])
             
-    # utf-8-sig força o Excel a manter todos os acentos e 'ç' do português intactos
     return output.getvalue().encode('utf-8-sig')
 # ==========================================
 
@@ -296,24 +306,47 @@ def renderizar_projetos(lista_projetos, eh_concluido=False):
                                 db.commit()
                                 st.rerun()
                 
-                with st.expander("📂 Documentos e Links"):
+                # --- ABA DE DOCUMENTOS, LINKS E PRINTS ---
+                with st.expander("📂 Documentos, Links e Prints"):
                     for d in db.query(Documento).filter(Documento.projeto_id == proj.id).all():
-                        c_link, c_del = st.columns([0.8, 0.2])
-                        c_link.markdown(f"🔗 [{d.nome}]({d.url})")
-                        if c_del.button("🗑️", key=f"del_doc_{d.id}", disabled=not eh_admin, help="Apenas Admin pode excluir" if not eh_admin else None):
-                            db.delete(d)
-                            db.commit()
-                            st.rerun()
+                        with st.container(border=True):
+                            c_link, c_del = st.columns([0.8, 0.2])
+                            
+                            # Se tiver imagem base64, renderiza a imagem
+                            if getattr(d, "arquivo_base64", None):
+                                c_link.markdown(f"📸 **{d.nome}**")
+                                img_bytes = base64.b64decode(d.arquivo_base64)
+                                c_link.image(img_bytes, use_container_width=True)
+                            
+                            # Se tiver link (ou se tiver os dois), renderiza o link
+                            if d.url:
+                                c_link.markdown(f"🔗 [{d.nome}]({d.url})")
+                                
+                            if c_del.button("🗑️", key=f"del_doc_{d.id}", disabled=not eh_admin, help="Apenas Admin pode excluir" if not eh_admin else None):
+                                db.delete(d)
+                                db.commit()
+                                st.rerun()
                             
                     with st.form(f"form_doc_{proj.id}", clear_on_submit=True):
-                        doc_nome = st.text_input("Nome (Ex: Planta)", key=f"nome_doc_{proj.id}")
-                        doc_url = st.text_input("Link", key=f"url_doc_{proj.id}")
-                        if st.form_submit_button("Salvar Link") and doc_nome and doc_url:
-                            db.add(Documento(projeto_id=proj.id, nome=doc_nome, url=doc_url))
-                            db.commit()
-                            st.rerun()
+                        st.markdown("**Adicionar Novo**")
+                        doc_nome = st.text_input("Nome do Arquivo/Link *", key=f"nome_doc_{proj.id}")
+                        doc_url = st.text_input("Link (Opcional)", key=f"url_doc_{proj.id}")
+                        doc_img = st.file_uploader("Upload de Print/Imagem (Opcional)", type=["png", "jpg", "jpeg"], key=f"img_doc_{proj.id}")
+                        
+                        if st.form_submit_button("Salvar Anexo"):
+                            if not doc_nome:
+                                st.error("O nome é obrigatório.")
+                            else:
+                                string_base64 = None
+                                if doc_img is not None:
+                                    # Converte a imagem em texto base64
+                                    bytes_img = doc_img.read()
+                                    string_base64 = base64.b64encode(bytes_img).decode('utf-8')
+                                    
+                                db.add(Documento(projeto_id=proj.id, nome=doc_nome, url=doc_url if doc_url else None, arquivo_base64=string_base64))
+                                db.commit()
+                                st.rerun()
 
-                # --- BOTÕES DE AÇÃO COM O NOVO BOTÃO EXCEL ---
                 c_painel, c_arq, c_xls, c_down, c_del = st.columns([1, 1.1, 1, 1, 1])
                 
                 if c_painel.button("Abrir", key=f"abrir_{proj.id}", use_container_width=True):
@@ -327,7 +360,6 @@ def renderizar_projetos(lista_projetos, eh_concluido=False):
                     db.commit()
                     st.rerun()
                     
-                # NOVO BOTÃO EXCEL (Relatório em Tabela)
                 dados_excel = gerar_relatorio_excel(db, proj.id)
                 c_xls.download_button(
                     label="📊 Excel",
@@ -337,7 +369,6 @@ def renderizar_projetos(lista_projetos, eh_concluido=False):
                     use_container_width=True
                 )
                 
-                # BOTÃO DE BACKUP .HYDRO (Restaurável)
                 json_backup = gerar_backup_projeto(db, proj.id)
                 c_down.download_button(
                     label="⬇️ Salvar",
@@ -352,7 +383,6 @@ def renderizar_projetos(lista_projetos, eh_concluido=False):
                     db.commit()
                     st.rerun()
 
-# --- BUSCA E DIVISÃO EM ABAS ---
 projetos_ativos = db.query(Projeto).filter(Projeto.concluido == False).all()
 projetos_concluidos = db.query(Projeto).filter(Projeto.concluido == True).all()
 
