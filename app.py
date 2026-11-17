@@ -12,7 +12,6 @@ st.set_page_config(page_title="Hydro Manager", page_icon="🌊", layout="wide")
 def iniciar_banco_uma_vez():
     db_atualizacao = SessionLocal()
     
-    # 1º PASSO: INJETAR AS COLUNAS ANTES DE QUALQUER BUSCA NO BANCO
     try:
         db_atualizacao.execute(text("ALTER TABLE tarefas ADD COLUMN responsavel VARCHAR DEFAULT 'Não atribuído';"))
         db_atualizacao.commit()
@@ -24,7 +23,6 @@ def iniciar_banco_uma_vez():
     except: db_atualizacao.rollback()
     
     try:
-        # Cria a coluna concluido antes do init_db() tentar buscar os projetos!
         db_atualizacao.execute(text("ALTER TABLE projetos ADD COLUMN concluido BOOLEAN DEFAULT FALSE;"))
         db_atualizacao.commit()
     except: db_atualizacao.rollback()
@@ -36,7 +34,6 @@ def iniciar_banco_uma_vez():
     finally:
         db_atualizacao.close()
         
-    # 2º PASSO: AGORA SIM, COM O BANCO PRONTO, RODAMOS A INICIALIZAÇÃO
     init_db()
     
     return True
@@ -191,7 +188,6 @@ with col_add.expander("➕ Novo Projeto", expanded=False):
         rio = c1.text_input("Rio")
         pot = c2.number_input("Potência (MW)", min_value=0.0, format="%.2f")
         
-        # --- MENU DE TEMPLATES ATUALIZADO ---
         opcao_template = st.selectbox(
             "Carregar Estrutura Automática", 
             ["Projeto Básico (Com tarefas e capítulos)", "Outorga D'água", "Cronograma Padrão Completo", "Nenhum (Criar do zero)"]
@@ -206,7 +202,6 @@ with col_add.expander("➕ Novo Projeto", expanded=False):
                 db.commit()
                 db.refresh(novo_proj)
                 
-                # Só roda o script se o usuário não escolheu "Nenhum"
                 if opcao_template != "Nenhum (Criar do zero)":
                     from services.template_hydro import aplicar_template_hydro
                     aplicar_template_hydro(db, novo_proj.id, opcao_template)
@@ -233,6 +228,9 @@ def renderizar_projetos(lista_projetos, eh_concluido=False):
     if not lista_projetos:
         st.info("Nenhum projeto encontrado nesta aba.")
         return
+        
+    # 🔒 VERIFICA SE QUEM ESTÁ LOGADO É O ADMIN
+    eh_admin = st.session_state.get("usuario_nome", "").lower() == "admin"
         
     cols = st.columns(3)
     for i, proj in enumerate(lista_projetos):
@@ -267,10 +265,13 @@ def renderizar_projetos(lista_projetos, eh_concluido=False):
                     for d in db.query(Documento).filter(Documento.projeto_id == proj.id).all():
                         c_link, c_del = st.columns([0.8, 0.2])
                         c_link.markdown(f"🔗 [{d.nome}]({d.url})")
-                        if c_del.button("🗑️", key=f"del_doc_{d.id}"):
+                        
+                        # 🔒 TRAVA NA LIXEIRA DO DOCUMENTO
+                        if c_del.button("🗑️", key=f"del_doc_{d.id}", disabled=not eh_admin, help="Apenas Admin pode excluir" if not eh_admin else None):
                             db.delete(d)
                             db.commit()
                             st.rerun()
+                            
                     with st.form(f"form_doc_{proj.id}", clear_on_submit=True):
                         doc_nome = st.text_input("Nome (Ex: Planta)", key=f"nome_doc_{proj.id}")
                         doc_url = st.text_input("Link", key=f"url_doc_{proj.id}")
@@ -279,14 +280,12 @@ def renderizar_projetos(lista_projetos, eh_concluido=False):
                             db.commit()
                             st.rerun()
 
-                # --- BOTÕES DE AÇÃO: 4 COLUNAS APERTADINHAS PARA CABER TUDO ---
                 c_painel, c_arq, c_down, c_del = st.columns([1.2, 1.2, 1, 1])
                 
                 if c_painel.button("Abrir", key=f"abrir_{proj.id}", use_container_width=True):
                     st.session_state['projeto_ativo_id'] = proj.id
                     st.switch_page("pages/1_Painel_de_Tarefas.py")
                     
-                # Botão Dinâmico: Finalizar ou Reabrir
                 txt_botao = "Reabrir" if eh_concluido else "Finalizar"
                 icone = "🔄" if eh_concluido else "✅"
                 if c_arq.button(f"{icone} {txt_botao}", key=f"arq_{proj.id}", use_container_width=True):
@@ -294,7 +293,6 @@ def renderizar_projetos(lista_projetos, eh_concluido=False):
                     db.commit()
                     st.rerun()
                     
-                # BOTÃO DE DOWNLOAD DO BACKUP
                 json_backup = gerar_backup_projeto(db, proj.id)
                 c_down.download_button(
                     label="⬇️ Salvar",
@@ -304,7 +302,8 @@ def renderizar_projetos(lista_projetos, eh_concluido=False):
                     use_container_width=True
                 )
                 
-                if c_del.button("Excluir", key=f"del_{proj.id}", use_container_width=True):
+                # 🔒 TRAVA NO BOTÃO EXCLUIR PROJETO
+                if c_del.button("Excluir", key=f"del_{proj.id}", use_container_width=True, disabled=not eh_admin, help="Apenas administradores podem excluir projetos." if not eh_admin else None):
                     db.delete(proj)
                     db.commit()
                     st.rerun()
