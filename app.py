@@ -39,6 +39,13 @@ def iniciar_banco_uma_vez():
         db_atualizacao.execute(text("ALTER TABLE documentos ADD COLUMN arquivo_base64 VARCHAR;"))
         db_atualizacao.commit()
     except: db_atualizacao.rollback()
+
+    # --- A CORREÇÃO DO ERRO ENTRA AQUI ---
+    # Avisa o banco de dados que a coluna 'url' não é mais obrigatória
+    try:
+        db_atualizacao.execute(text("ALTER TABLE documentos ALTER COLUMN url DROP NOT NULL;"))
+        db_atualizacao.commit()
+    except: db_atualizacao.rollback()
     
     finally:
         db_atualizacao.close()
@@ -81,7 +88,6 @@ if not st.session_state["autenticado"]:
     st.stop()
 
 with st.sidebar:
-    # Mostra uma coroa se for o admin!
     eh_admin_logado = st.session_state["usuario_nome"].lower() == "admin"
     icone_usuario = "👑" if eh_admin_logado else "👤"
     
@@ -312,13 +318,11 @@ def renderizar_projetos(lista_projetos, eh_concluido=False):
                         with st.container(border=True):
                             c_link, c_del = st.columns([0.8, 0.2])
                             
-                            # Se tiver imagem base64, renderiza a imagem
                             if getattr(d, "arquivo_base64", None):
                                 c_link.markdown(f"📸 **{d.nome}**")
                                 img_bytes = base64.b64decode(d.arquivo_base64)
                                 c_link.image(img_bytes, use_container_width=True)
                             
-                            # Se tiver link (ou se tiver os dois), renderiza o link
                             if d.url:
                                 c_link.markdown(f"🔗 [{d.nome}]({d.url})")
                                 
@@ -339,7 +343,6 @@ def renderizar_projetos(lista_projetos, eh_concluido=False):
                             else:
                                 string_base64 = None
                                 if doc_img is not None:
-                                    # Converte a imagem em texto base64
                                     bytes_img = doc_img.read()
                                     string_base64 = base64.b64encode(bytes_img).decode('utf-8')
                                     
